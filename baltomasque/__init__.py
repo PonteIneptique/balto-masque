@@ -14,9 +14,9 @@ import scipy.stats
 from PIL import Image
 from kraken.lib.xml import parse_xml
 from kraken.lib.segmentation import extract_polygons
-
+import lxml.etree as ET
 # Web deps
-from flask import Flask, current_app, request, render_template
+from flask import Flask, current_app, request, render_template, Response
 
 Logger = logging.getLogger()
 Logger.setLevel(logging.INFO)
@@ -156,7 +156,6 @@ def apply_iqr(
             scores = dict(min_y=max_iqr)
         if line["idx"] in margins:
             scores.update(margins[line["idx"]])
-            print(scores)
         new_lines.append({
             **line,
             "boundary": list(_apply(line["boundary"], line["bby"], **scores))
@@ -205,7 +204,6 @@ def get_page():
 
     margins = {}
     if request.method == "POST":
-        print(request.form)
         margins = {
             int(field_name.split("_")[-1]): {"margin_max_y": None, "margin_min_y": None}
             for field_name in request.form
@@ -224,9 +222,26 @@ def get_page():
         poly[1]["idx"]: {"img": img_to_base64(poly), "height": poly[0].height}
         for poly in extract_polygons(image, {"lines": changes, "type": "baselines"})
     }
+    doc = None
+    if request.form.get("serialize", "off") == "on":
+        def map_coords(line_dict, attribute: str) -> str:
+            points = line_dict[attribute]
+            return " ".join([f"{x} {y}" for (x, y) in points])
 
+        changed_lines = {
+            map_coords(line, "baseline"): line
+            for line in changes
+            if line["idx"] in margins
+        }
+        doc = ET.parse(page)
+        for line in doc.findall("//{*}TextLine"):
+            if line.attrib["BASELINE"] in changed_lines:
+                for poly in line.findall(".//{*}Polygon"):
+                    poly.attrib["POINTS"] = map_coords(changed_lines[line.attrib["BASELINE"]], "boundary")
+        return Response(ET.tostring(doc, encoding=str), mimetype="text/xml")
     return render_template(
         "container.html",
+        doc=doc,
         content=outliers,
         orig_images=orig_images,
         medians={"top": max_cuttings, "bot": min_cuttings},
