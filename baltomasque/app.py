@@ -8,8 +8,10 @@ from typing import List, Optional, Iterable, Any, Dict, Tuple, Union
 import base64
 from io import BytesIO
 
+
 # Kraken deps
-import numpy
+import numpy as np
+import numpy.typing
 import scipy.stats
 from PIL import Image
 from kraken.lib.xml import parse_xml
@@ -17,6 +19,7 @@ from kraken.lib.segmentation import extract_polygons
 import lxml.etree as ET
 # Web deps
 from flask import Flask, current_app, request, render_template, Response
+from shapely.geometry import LineString
 
 Logger = logging.getLogger()
 Logger.setLevel(logging.INFO)
@@ -68,9 +71,11 @@ Outlier = namedtuple("Outlier", ["idx", "value", "score"])
 def get_min_max_y(lines: List[Dict[str, Any]]) -> Iterable[BoundaryBaselineY]:
     for line in lines:
         _, y_pol = list(zip(*[points for points in line["boundary"]]))
-        _, y_base = list(zip(*[points for points in line["baseline"]]))
         max_y = max(y_pol)
         min_y = min(y_pol)
+
+        _, y_base = list(zip(*[points for points in line["baseline"]]))
+
         yield BoundaryBaselineY(max_y, min_y, min(y_base), max(y_base))
 
 
@@ -81,12 +86,28 @@ def get_diff(bby: Union[Tuple[int, int], BoundaryBaselineY], mode: str = "min_y"
         return bby.max_y - bby.base_y_max
 
 
+def is_outlier(bby: Union[Tuple[int, int], BoundaryBaselineY], score: Score, mode: str = "min_y"):
+    diff_y = get_diff(bby, mode=mode)
+    diff = abs(score.median - diff_y)
+    if diff > score.iqr:
+        return diff_y, diff
+    return False
+
+
+def is_up_outlier(p_y: int, b_y: int, score: Score):
+    diff_y = abs(p_y - b_y)
+    if diff_y < score.median:
+        return False
+    elif abs(score.median - diff_y) > score.iqr:
+        return True
+    return False
+
+
 def get_outliers_iqr(lines: List[BoundaryBaselineY], score: Score, attr: str = "min_y") -> Iterable[Outlier]:
     for line_idx, line in enumerate(lines):
-        diff_y = get_diff(line, mode=attr)
-        diff = abs(score.median - diff_y)
-        if diff > score.iqr:
-            yield Outlier(line_idx, diff_y, diff)
+        was_outlier = is_outlier(line, score, mode=attr)
+        if was_outlier:
+            yield Outlier(line_idx, *was_outlier)
 
 
 def compute_cuttings(boundaries: List[BoundaryBaselineY], qrt_bot: int = 10) -> Tuple[Score, Score]:
@@ -97,7 +118,10 @@ def compute_cuttings(boundaries: List[BoundaryBaselineY], qrt_bot: int = 10) -> 
             for bby in boundaries
         ]
     ))
-    min_score = Score(median(diff_y_min), scipy.stats.iqr(diff_y_min, rng=(qrt_bot, qrt_top)))
+    min_score = Score(
+        median(diff_y_min),
+        scipy.stats.iqr(diff_y_min, rng=(qrt_bot, qrt_top))
+    )
     max_score = Score(median(diff_y_max), scipy.stats.iqr(diff_y_max, rng=(qrt_bot, qrt_top)))
     return max_score, min_score
 
@@ -112,30 +136,18 @@ def img_to_base64(img: Tuple[Image.Image, Any]) -> bytes:
 
 def _apply(
         x_y: Iterable[Tuple[int, int]],
-        bby: BoundaryBaselineY,
+        baseline: numpy.typing.ArrayLike,
         min_y: Optional[Score] = None,
         max_y: Optional[Score] = None,
-        factor_min_y: float = 1,
-        factor_max_y: float = 0,
         margin_min_y: int = 0,
         margin_max_y: int = 0
 ):
-    baseline_y = (bby.base_y_max + bby.base_y_min) / 2
     for (x, y) in x_y:
-        if max_y and y > baseline_y:
-            diff_y = y - baseline_y
-            diff = abs(max_y.median - diff_y)
-            if diff > max_y.iqr:
-                yield x, ceil(baseline_y + max_y.median)+(margin_max_y or 0)
-            else:
-                yield x, y
-        elif min_y and y < baseline_y:
-            diff_y = baseline_y - y
-            diff = abs(min_y.median - diff_y)
-            if diff > min_y.iqr:
-                yield x, ceil(baseline_y - min_y.median)-(margin_min_y or 0)
-            else:
-                yield x, y
+        _, baseline_y = get_closest_points((x, y), baseline)
+        if max_y and y > baseline_y and is_up_outlier(y, baseline_y, max_y):
+            yield x, ceil(baseline_y + max_y.median) + (margin_max_y or 0)
+        elif min_y and y < baseline_y and is_up_outlier(y, baseline_y, min_y):
+            yield x, ceil(baseline_y - min_y.median) - (margin_min_y or 0)
         else:
             yield x, y
 
@@ -150,6 +162,7 @@ def apply_iqr(
     new_lines = []
     margins = margins or {}
     for line in kept_lines:
+        baseline = line["advanced_baseline"]
         details = outliers[line["idx"]]
         if details["max"] and details["min"]:
             scores = dict(min_y=min_iqr, max_y=max_iqr)
@@ -161,10 +174,33 @@ def apply_iqr(
             scores.update(margins[line["idx"]])
         new_lines.append({
             **line,
-            "boundary": list(_apply(line["boundary"], line["bby"], **scores))
+            "boundary": list(_apply(line["boundary"], baseline=baseline, **scores))
         })
 
     return new_lines
+
+
+def get_closest_points(current_point: Tuple[int, int], baseline: np.typing.ArrayLike) -> Tuple[int, int]:
+    distances = np.linalg.norm(baseline - np.array(current_point), axis=1)
+    min_index = np.argmin(distances)
+    return tuple(baseline[min_index])
+
+
+def get_all_points(baseline: List[Tuple[int, int]]) -> np.typing.ArrayLike:
+    # https://gis.stackexchange.com/questions/263859/fast-way-to-get-all-points-as-integer-of-a-linestring-in-shapely
+    ls = LineString(baseline)
+    xy = []
+    for f in range(0, int(ceil(ls.length)) + 1, ceil(ls.length/50)):
+        p = ls.interpolate(f).coords[0]
+        pr = tuple(map(round, p))
+        if pr not in xy:
+            xy.append(pr)
+    return np.array(xy)
+
+
+def add_advanced_baseline(line: Dict[str, Any]) -> Dict[str, Any]:
+    line["advanced_baseline"] = get_all_points(line["baseline"])
+    return line
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -176,6 +212,7 @@ def get_page():
     ignore_zone = request.args.get("ignore_zone", "", type=str)
     content = parse_xml(page)
     lines = content["lines"]
+    lines = [add_advanced_baseline(line) for line in lines]
 
     masks_extremes = list(get_min_max_y(lines))
     max_cuttings, min_cuttings = compute_cuttings(masks_extremes, qrt_bot=qrt)
