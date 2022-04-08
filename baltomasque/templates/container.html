@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="">
+    <meta name="author" content="Thibault Clérice">
+    <title>Balto Masqué</title>
+    <link href="{{url_for("static", filename="bootstrap.min.css")}}" rel="stylesheet">
+      <style>
+          .number { width: 7%; }
+      </style>
+  </head>
+  <body class="bg-light">
+    <header class="navbar navbar-light bg-dark">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="#">Masqué</a>
+        <form class="d-flex" method="get">
+            <select class="form-select form-select-sm" aria-label="Page to edit" name="page">
+                {% for possible_page in pages %}
+                <option value="{{possible_page}}" {% if possible_page == current_page %}selected{% endif %}>{{possible_page|nicename}}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-close-white" type="submit">Edit</button>
+        </form>
+      </div>
+    </header>
+    <div class="bd-cheatsheet container-fluid bg-body">
+      <section id="content" class="p-4">
+        <div class="row">
+            <div class="col-md-6">
+              <h2>Scores</h2>
+              <dl class="row">
+                  <dt class="col-sm-6">Median maximum difference between baseline and <u>top</u> of the mask</dt>
+                  <dd class="col-sm-6">{{medians.top.median}} (IQR: {{medians.top.iqr}})</dd>
+                  <dt class="col-sm-6">Median maximum difference between baseline and <u>bottom</u> of the mask</dt>
+                  <dd class="col-sm-6">{{medians.bot.median}} (IQR: {{medians.bot.iqr}})</dd>
+                  <dt class="col-sm-6">Number of lines found</dt>
+                  <dd class="col-sm-6">{{lines|length}}</dd>
+                  <dt class="col-sm-6">Number of outliers found</dt>
+                  <dd class="col-sm-6">{{content|length}}</dd>
+              </dl>
+            </div>
+            <div class="col-md-6">
+                <form class="form border rounded p-2" action="{{url_for("get_page", page=current_page)}}" method="get">
+                    <h2>Parameters</h2>
+                    <div class="row">
+                        <label class="col-md-3  col-form-label" for="qrt">Quartile</label>
+                        <div class="col-md-9"><input name="qrt" id="qrt" class="form-control" type="number" min="1" max="49" value="{{qrt}}" /></div>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Change parameters</button>
+                </form>
+            </div>
+        </div>
+        <form class="form border rounded p-2" action="{{url_for("get_page", page=current_page, qrt=qrt)}}" method="POST">
+            <input type="submit" class="btn btn-primary" value="Preview changes" />
+              <label for="serialize">
+                <input type="checkbox" name="serialize"  id="serialize" value="on" /> Serialize
+              </label>
+            <table class="table table-bordered table-hover" style="width: 100%; table-layout: fixed;">
+              <thead>
+                <tr>
+                  <th class="number">Line ID</th>
+                    <th class="number">Lowest y too far</th>
+                    <th class="number">Highest y too far</th>
+                    <th>Image</th>
+                    <th>Preview</th>
+                    <th class="number">Preview height</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row, vals in content.items() %}
+                    <tr><td class="number">{{row}}</td>
+                        <td class="number">{% if vals.max %}{{vals.max.value}}{%endif%}</td>
+                        <td class="number">{% if vals.min %}{{vals.min.value}}{%endif%}</td>
+                        <td><img src="{{orig_images[row]}}" class="img-fluid" alt="There should be an image here" /></td>
+                        <td><img src="{{preview[row].img}}" class="img-fluid" alt="There should be an image here" /></td>
+                        <td class="number">{{preview[row].height}}</td>
+                        <td>
+                            {% if vals.max %}
+                                <input type="checkbox" name="update_max_{{row}}" id="update_max_{{row}}" value="on" {% if row in margins%}checked{%endif%}> <label for="update_max_{{row}}">Apply to bottom mask</label><br />
+                                Custom bottom margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_max_y%}{{margins[row].margin_max_y}}{%else%}0{%endif%}" id="custom_margin_max_{{row}}" name="custom_margin_max_{{row}}" /><br />
+                                {% if vals.min %}<hr />{% endif %}
+                            {% endif %}
+                            {% if vals.min %}
+                                <input type="checkbox" name="update_min_{{row}}" id="update_min_{{row}}" value="on" {% if row in margins%}checked{%endif%}> <label for="update_min_{{row}}">Apply to top mask</label><br />
+                                Custom top margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_min_y%}{{margins[row].margin_min_y}}{%else%}0{%endif%}" id="custom_margin_min_{{row}}" name="custom_margin_min_{{row}}" /><br />
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+        </form>
+      </section>
+    </div>
+  </body>
+</html>
