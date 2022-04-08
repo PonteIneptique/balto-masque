@@ -63,7 +63,8 @@ def nicename(filename):
     return os.path.basename(filename)
 
 
-BoundaryBaselineY = namedtuple("BoundaryBaselineY", ["max_y", "min_y", "base_y_min", "base_y_max"])
+BoundaryBaselineY = namedtuple("BoundaryBaselineY", ["max_y", "min_y", "base_y_max", "base_y_min",
+                                                     "dist_min", "dist_max"])
 Score = namedtuple("Score", ["median", "iqr"])
 Outlier = namedtuple("Outlier", ["idx", "value", "score"])
 
@@ -82,31 +83,35 @@ def get_min_max_y(lines: List[Dict[str, Any]]) -> Iterable[BoundaryBaselineY]:
                 baselines.append(base_y)
         max_idx = dists.index(max(dists))
         min_idx = dists.index(min(dists))
-        yield BoundaryBaselineY(ys[max_idx], ys[min_idx], baselines[min_idx], baselines[max_idx])
+        yield BoundaryBaselineY(
+            ys[max_idx],
+            ys[min_idx],
+            baselines[max_idx],
+            baselines[min_idx],
+            dists[max_idx],
+            dists[min_idx]
+        )
 
 
 def get_diff(bby: Union[Tuple[int, int], BoundaryBaselineY], mode: str = "min_y"):
     if mode == "min_y":
-        return bby.base_y_min - bby.min_y
+        return bby.dist_min
     else:
-        return bby.max_y - bby.base_y_max
+        return bby.dist_max
 
 
 def is_outlier(bby: Union[Tuple[int, int], BoundaryBaselineY], score: Score, mode: str = "min_y"):
-    diff_y = abs(get_diff(bby, mode=mode))
-    diff = abs(score.median - diff_y)
-    if diff > score.iqr:
-        return diff_y, diff
+    diff_y = get_diff(bby, mode=mode)
+    if diff_y > score.iqr:
+        return diff_y, abs(score.iqr - diff_y)
     return False
 
 
 def is_up_outlier(p_y: int, b_y: int, score: Score):
     diff_y = abs(p_y - b_y)
-    if diff_y < score.median:
+    if diff_y < score.iqr:
         return False
-    elif abs(score.median - diff_y) > score.iqr:
-        return True
-    return False
+    return True
 
 
 def get_outliers_iqr(lines: List[BoundaryBaselineY], score: Score, attr: str = "min_y") -> Iterable[Outlier]:
@@ -120,11 +125,10 @@ def compute_cuttings(boundaries: List[BoundaryBaselineY], qrt_bot: int = 10) -> 
     qrt_top: int = 100 - qrt_bot
     diff_y_max, diff_y_min = list(zip(
         *[
-            (abs(bby.max_y-bby.base_y_max), abs(bby.base_y_min-bby.min_y))
+            (bby.dist_max, bby.dist_min)
             for bby in boundaries
         ]
     ))
-    print(diff_y_min)
     min_score = Score(
         median(diff_y_min),
         scipy.stats.scoreatpercentile(diff_y_min, qrt_top)#+median(diff_y_min)
@@ -133,7 +137,6 @@ def compute_cuttings(boundaries: List[BoundaryBaselineY], qrt_bot: int = 10) -> 
         median(diff_y_max),
         scipy.stats.scoreatpercentile(diff_y_max, qrt_top)#+median(diff_y_max)
     )
-    print(min_score, max_score)
     return max_score, min_score
 
 
@@ -156,9 +159,9 @@ def redraw_polygon(
     for (x, y) in x_y:
         _, baseline_y = get_closest_points((x, y), baseline)
         if max_y and y > baseline_y and is_up_outlier(y, baseline_y, max_y):
-            yield x, ceil(baseline_y + max_y.median) + (margin_max_y or 0)
+            yield x, ceil(baseline_y + max_y.iqr) + (margin_max_y or 0)
         elif min_y and y < baseline_y and is_up_outlier(y, baseline_y, min_y):
-            yield x, ceil(baseline_y - min_y.median) - (margin_min_y or 0)
+            yield x, ceil(baseline_y - min_y.iqr) - (margin_min_y or 0)
         else:
             yield x, y
 
@@ -180,7 +183,7 @@ def apply_iqr(
         elif details["max"]:
             scores = dict(max_y=max_iqr)
         else:
-            scores = dict(min_y=max_iqr)
+            scores = dict(min_y=min_iqr)
         if line["idx"] in margins:
             scores.update(margins[line["idx"]])
         new_lines.append({
@@ -265,7 +268,7 @@ def get_page():
                 idx = int(field_name.split("_")[-1])
                 if "max" in field_name and request.form.get(f"update_max_{idx}", "off") == "on":
                     margins[idx]["margin_max_y"] = int(request.form[field_name])
-                elif "min" in field_name and request.form.get(f"update_min_{idx}", "off") == "on":
+                if "min" in field_name and request.form.get(f"update_min_{idx}", "off") == "on":
                     margins[idx]["margin_min_y"] = int(request.form[field_name])
 
     changes = apply_iqr(outliers, kept_lines, min_iqr=min_cuttings, max_iqr=max_cuttings, margins=margins)
