@@ -42,11 +42,16 @@
               </dl>
             </div>
             <div class="col-md-6">
-                <form class="form border rounded p-2" action="{{url_for("get_page", page=current_page)}}" method="get">
+                <form class="form border rounded p-2" action="{{url_for("get_page")}}" method="get">
                     <h2>Parameters</h2>
+                    <input type="hidden" name="page" value="{{current_page}}">
                     <div class="row">
-                        <label class="col-md-3  col-form-label" for="qrt">Quartile</label>
-                        <div class="col-md-9"><input name="qrt" id="qrt" class="form-control" type="number" min="1" max="49" value="{{qrt}}" /></div>
+                        <label class="col-md-6  col-form-label" for="qrt_top">Percentile des masques les plus hauts</label>
+                        <div class="col-md-6"><input name="qrt_top" id="qrt_top" class="form-control" type="number" min="1" max="49" value="{{qrt_top}}" /></div>
+                    </div>
+                    <div class="row">
+                        <label class="col-md-6  col-form-label" for="qrt_bot">Percentile des masques les plus bas</label>
+                        <div class="col-md-6"><input name="qrt_bot" id="qrt_bot" class="form-control" type="number" min="1" max="49" value="{{qrt_bot}}" /></div>
                     </div>
                     <button class="btn btn-primary" type="submit">Change parameters</button>
                 </form>
