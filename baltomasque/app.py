@@ -70,13 +70,19 @@ Outlier = namedtuple("Outlier", ["idx", "value", "score"])
 
 def get_min_max_y(lines: List[Dict[str, Any]]) -> Iterable[BoundaryBaselineY]:
     for line in lines:
-        _, y_pol = list(zip(*[points for points in line["boundary"]]))
-        max_y = max(y_pol)
-        min_y = min(y_pol)
-
-        _, y_base = list(zip(*[points for points in line["baseline"]]))
-
-        yield BoundaryBaselineY(max_y, min_y, min(y_base), max(y_base))
+        ys = []
+        dists = []
+        baselines = []
+        for (x_pol, y_pol) in line["boundary"]:
+            _, base_y = get_closest_points((x_pol, y_pol), line["advanced_baseline"])
+            dist = abs(base_y - y_pol)
+            if dist != 0:
+                ys.append(y_pol)
+                dists.append(dist)
+                baselines.append(base_y)
+        max_idx = dists.index(max(dists))
+        min_idx = dists.index(min(dists))
+        yield BoundaryBaselineY(ys[max_idx], ys[min_idx], baselines[min_idx], baselines[max_idx])
 
 
 def get_diff(bby: Union[Tuple[int, int], BoundaryBaselineY], mode: str = "min_y"):
@@ -87,7 +93,7 @@ def get_diff(bby: Union[Tuple[int, int], BoundaryBaselineY], mode: str = "min_y"
 
 
 def is_outlier(bby: Union[Tuple[int, int], BoundaryBaselineY], score: Score, mode: str = "min_y"):
-    diff_y = get_diff(bby, mode=mode)
+    diff_y = abs(get_diff(bby, mode=mode))
     diff = abs(score.median - diff_y)
     if diff > score.iqr:
         return diff_y, diff
@@ -114,15 +120,20 @@ def compute_cuttings(boundaries: List[BoundaryBaselineY], qrt_bot: int = 10) -> 
     qrt_top: int = 100 - qrt_bot
     diff_y_max, diff_y_min = list(zip(
         *[
-            (bby.max_y-bby.base_y_max, bby.base_y_min-bby.min_y)
+            (abs(bby.max_y-bby.base_y_max), abs(bby.base_y_min-bby.min_y))
             for bby in boundaries
         ]
     ))
+    print(diff_y_min)
     min_score = Score(
         median(diff_y_min),
-        scipy.stats.iqr(diff_y_min, rng=(qrt_bot, qrt_top))
+        scipy.stats.scoreatpercentile(diff_y_min, qrt_top)#+median(diff_y_min)
     )
-    max_score = Score(median(diff_y_max), scipy.stats.iqr(diff_y_max, rng=(qrt_bot, qrt_top)))
+    max_score = Score(
+        median(diff_y_max),
+        scipy.stats.scoreatpercentile(diff_y_max, qrt_top)#+median(diff_y_max)
+    )
+    print(min_score, max_score)
     return max_score, min_score
 
 
@@ -134,7 +145,7 @@ def img_to_base64(img: Tuple[Image.Image, Any]) -> bytes:
     return (bytes("data:image/jpeg;base64,", encoding='utf-8') + img_str).decode()
 
 
-def _apply(
+def redraw_polygon(
         x_y: Iterable[Tuple[int, int]],
         baseline: numpy.typing.ArrayLike,
         min_y: Optional[Score] = None,
@@ -174,7 +185,7 @@ def apply_iqr(
             scores.update(margins[line["idx"]])
         new_lines.append({
             **line,
-            "boundary": list(_apply(line["boundary"], baseline=baseline, **scores))
+            "boundary": list(redraw_polygon(line["boundary"], baseline=baseline, **scores))
         })
 
     return new_lines
