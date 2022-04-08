@@ -238,7 +238,9 @@ def get_page():
             if line.attrib["BASELINE"] in changed_lines:
                 for poly in line.findall(".//{*}Polygon"):
                     poly.attrib["POINTS"] = map_coords(changed_lines[line.attrib["BASELINE"]], "boundary")
-        return Response(ET.tostring(doc, encoding=str), mimetype="text/xml")
+        return Response(ET.tostring(doc, encoding=str), mimetype="text/xml", headers={
+            "Content-Disposition": f"attachment; filename={os.path.basename(page)}"
+        })
     return render_template(
         "container.html",
         doc=doc,
