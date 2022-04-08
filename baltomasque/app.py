@@ -121,8 +121,7 @@ def get_outliers_iqr(lines: List[BoundaryBaselineY], score: Score, attr: str = "
             yield Outlier(line_idx, *was_outlier)
 
 
-def compute_cuttings(boundaries: List[BoundaryBaselineY], qrt_bot: int = 10) -> Tuple[Score, Score]:
-    qrt_top: int = 100 - qrt_bot
+def compute_cuttings(boundaries: List[BoundaryBaselineY], qrt_bot: int = 10, qrt_top: int = 10) -> Tuple[Score, Score]:
     diff_y_max, diff_y_min = list(zip(
         *[
             (bby.dist_max, bby.dist_min)
@@ -131,11 +130,11 @@ def compute_cuttings(boundaries: List[BoundaryBaselineY], qrt_bot: int = 10) -> 
     ))
     min_score = Score(
         median(diff_y_min),
-        scipy.stats.scoreatpercentile(diff_y_min, qrt_top)#+median(diff_y_min)
+        scipy.stats.scoreatpercentile(diff_y_min, 100-qrt_top)#+median(diff_y_min)
     )
     max_score = Score(
         median(diff_y_max),
-        scipy.stats.scoreatpercentile(diff_y_max, qrt_top)#+median(diff_y_max)
+        scipy.stats.scoreatpercentile(diff_y_max, 100-qrt_bot)#+median(diff_y_max)
     )
     return max_score, min_score
 
@@ -159,9 +158,9 @@ def redraw_polygon(
     for (x, y) in x_y:
         _, baseline_y = get_closest_points((x, y), baseline)
         if max_y and y > baseline_y and is_up_outlier(y, baseline_y, max_y):
-            yield x, ceil(baseline_y + max_y.iqr) + (margin_max_y or 0)
+            yield x, ceil(baseline_y + max_y.median) + (margin_max_y or 0)
         elif min_y and y < baseline_y and is_up_outlier(y, baseline_y, min_y):
-            yield x, ceil(baseline_y - min_y.iqr) - (margin_min_y or 0)
+            yield x, ceil(baseline_y - min_y.median) - (margin_min_y or 0)
         else:
             yield x, y
 
@@ -221,7 +220,8 @@ def add_advanced_baseline(line: Dict[str, Any]) -> Dict[str, Any]:
 def get_page():
     xmls = get_xml()
     page = request.args.get("page", xmls[0])
-    qrt = request.args.get("qrt", 10, type=int)
+    qrt_bot = request.args.get("qrt_bot", 20, type=int)
+    qrt_top = request.args.get("qrt_top", 10, type=int)
     # ToDo: Allow for linetype ignoring
     ignore_zone = request.args.get("ignore_zone", "", type=str)
     content = parse_xml(page)
@@ -229,7 +229,7 @@ def get_page():
     lines = [add_advanced_baseline(line) for line in lines]
 
     masks_extremes = list(get_min_max_y(lines))
-    max_cuttings, min_cuttings = compute_cuttings(masks_extremes, qrt_bot=qrt)
+    max_cuttings, min_cuttings = compute_cuttings(masks_extremes, qrt_bot=qrt_bot, qrt_top=qrt_top)
     max_outliers = list(get_outliers_iqr(masks_extremes, max_cuttings, "max_y"))
     min_outliers = list(get_outliers_iqr(masks_extremes, min_cuttings, "min_y"))
 
@@ -304,5 +304,7 @@ def get_page():
         lines=lines,
         pages=xmls,
         current_page=page,
-        qrt=qrt, preview=preview, margins=margins
+        qrt_bot=qrt_bot,
+        qrt_top=qrt_top,
+        preview=preview, margins=margins
     )
