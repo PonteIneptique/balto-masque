@@ -1,0 +1,18 @@
+{% extends "container.html" %}
+{% block body %}
+<div class="row row-cols-5 row-cols-md-6 g-4">
+    {% for page, parsed in details.items() %}
+      <div class="col">
+        <div class="card">
+            <img src="{{url_for("get_image", path=parsed.image)}}" />
+            <div class="card-body">
+            <h5 class="card-title">{{parsed.basename}}</h5>
+            <p class="card-text">
+                <a class="btn btn-primary" href="{{url_for("page_iqr", page=page)}}">Check outliers</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+</div>
+{% endblock %}

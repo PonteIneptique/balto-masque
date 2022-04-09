@@ -18,7 +18,7 @@ from kraken.lib.xml import parse_xml
 from kraken.lib.segmentation import extract_polygons
 import lxml.etree as ET
 # Web deps
-from flask import Flask, current_app, request, render_template, Response
+from flask import Flask, current_app, request, render_template, Response, send_file
 from shapely.geometry import LineString
 
 Logger = logging.getLogger()
@@ -216,8 +216,23 @@ def add_advanced_baseline(line: Dict[str, Any]) -> Dict[str, Any]:
     return line
 
 
+@app.route('/image/<path:path>')
+def get_image(path):
+    return send_file("/"+path if path.startswith("home") else path)
+
+
 @app.route("/", methods=["GET", "POST"])
-def get_page():
+def index():
+    xmls = get_xml()
+    details = {
+        page: {**parse_xml(page), "basename": os.path.basename(page)}
+        for page in xmls
+    }
+    return render_template("index.html", details=details, pages=xmls)
+
+
+@app.route("/approach/stats", methods=["GET", "POST"])
+def page_iqr():
     xmls = get_xml()
     page = request.args.get("page", xmls[0])
     qrt_bot = request.args.get("qrt_bot", 20, type=int)
@@ -296,7 +311,7 @@ def get_page():
             "Content-Disposition": f"attachment; filename={os.path.basename(page)}"
         })
     return render_template(
-        "container.html",
+        "over_percentile.html",
         doc=doc,
         content=outliers,
         orig_images=orig_images,

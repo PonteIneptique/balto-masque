@@ -27,76 +27,8 @@
     </header>
     <div class="bd-cheatsheet container-fluid bg-body">
       <section id="content" class="p-4">
-        <div class="row">
-            <div class="col-md-6">
-              <h2>Scores</h2>
-              <dl class="row">
-                  <dt class="col-sm-6">Median maximum difference between baseline and <u>top</u> of the mask</dt>
-                  <dd class="col-sm-6">{{medians.top.median}} (IQR: {{medians.top.iqr}})</dd>
-                  <dt class="col-sm-6">Median maximum difference between baseline and <u>bottom</u> of the mask</dt>
-                  <dd class="col-sm-6">{{medians.bot.median}} (IQR: {{medians.bot.iqr}})</dd>
-                  <dt class="col-sm-6">Number of lines found</dt>
-                  <dd class="col-sm-6">{{lines|length}}</dd>
-                  <dt class="col-sm-6">Number of outliers found</dt>
-                  <dd class="col-sm-6">{{content|length}}</dd>
-              </dl>
-            </div>
-            <div class="col-md-6">
-                <form class="form border rounded p-2" action="{{url_for("get_page")}}" method="get">
-                    <h2>Parameters</h2>
-                    <input type="hidden" name="page" value="{{current_page}}">
-                    <div class="row">
-                        <label class="col-md-6  col-form-label" for="qrt_top">Percentile des masques les plus hauts</label>
-                        <div class="col-md-6"><input name="qrt_top" id="qrt_top" class="form-control" type="number" min="1" max="49" value="{{qrt_top}}" /></div>
-                    </div>
-                    <div class="row">
-                        <label class="col-md-6  col-form-label" for="qrt_bot">Percentile des masques les plus bas</label>
-                        <div class="col-md-6"><input name="qrt_bot" id="qrt_bot" class="form-control" type="number" min="1" max="49" value="{{qrt_bot}}" /></div>
-                    </div>
-                    <button class="btn btn-primary" type="submit">Change parameters</button>
-                </form>
-            </div>
-        </div>
-        <form class="form border rounded p-2" action="{{url_for("get_page", page=current_page, qrt=qrt)}}" method="POST">
-            <input type="submit" class="btn btn-primary" value="Preview changes" />
-              <label for="serialize">
-                <input type="checkbox" name="serialize"  id="serialize" value="on" /> Serialize
-              </label>
-            <table class="table table-bordered table-hover" style="width: 100%; table-layout: fixed;">
-              <thead>
-                <tr>
-                  <th class="number">Line ID</th>
-                    <th class="number">Bottom max dist</th>
-                    <th class="number">Top max dist</th>
-                    <th>Image</th>
-                    <th>Preview</th>
-                    <th class="number">Preview height</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for row, vals in content.items() %}
-                    <tr><td class="number">{{row}}</td>
-                        <td class="number">{% if vals.max %}{{vals.max.value}}{%endif%}</td>
-                        <td class="number">{% if vals.min %}{{vals.min.value}}{%endif%}</td>
-                        <td><img src="{{orig_images[row]}}" class="img-fluid" alt="There should be an image here" /></td>
-                        <td><img src="{{preview[row].img}}" class="img-fluid" alt="There should be an image here" /></td>
-                        <td class="number">{{preview[row].height}}</td>
-                        <td>
-                            {% if vals.max %}
-                                <input type="checkbox" name="update_max_{{row}}" id="update_max_{{row}}" value="on" {% if row in margins%}checked{%endif%}> <label for="update_max_{{row}}">Apply to bottom mask</label><br />
-                                Custom bottom margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_max_y%}{{margins[row].margin_max_y}}{%else%}0{%endif%}" id="custom_margin_max_{{row}}" name="custom_margin_max_{{row}}" /><br />
-                                {% if vals.min %}<hr />{% endif %}
-                            {% endif %}
-                            {% if vals.min %}
-                                <input type="checkbox" name="update_min_{{row}}" id="update_min_{{row}}" value="on" {% if row in margins%}checked{%endif%}> <label for="update_min_{{row}}">Apply to top mask</label><br />
-                                Custom top margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_min_y%}{{margins[row].margin_min_y}}{%else%}0{%endif%}" id="custom_margin_min_{{row}}" name="custom_margin_min_{{row}}" /><br />
-                            {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-        </form>
+          {%block body%}
+          {%endblock%}
       </section>
     </div>
   </body>
