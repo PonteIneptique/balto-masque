@@ -1,2 +1,3 @@
 kraken==4.1.0
 flask==2.1.1
+layouts-segmentation-simplifier

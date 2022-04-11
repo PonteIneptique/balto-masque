@@ -31,20 +31,43 @@
     </div>
 </div>
 <form class="form border rounded p-2" id="main-form" action="{{url_for("page_prct", page=current_page, under_prct=under_prct, above_prct=above_prct)}}" method="POST">
-    <input type="submit" class="btn btn-primary" value="Preview changes" />
-      <label for="serialize">
-        <input type="checkbox" name="serialize"  id="serialize" value="on" /> Serialize
-      </label>
+    <div class="card 25">
+      <div class="card-header">
+        Preview or save changes
+      </div>
+      <div class="card-body">
+          <div class="p-1">
+              <label for="simplify">
+                <input type="checkbox" name="simplify"  id="simplify" value="on" {% if simply %}checked{% endif %}/> Simplify masks
+              </label>
+          </div>
+          <div class="p-1">
+              <label for="download">
+                <input type="checkbox" name="download"  id="download" value="on" /> Download
+              </label>
+          </div>
+          <div class="p-1">
+              <label for="overwrite">
+                <input type="checkbox" name="overwrite"  id="overwrite" value="on" {% if overwrite %}checked{% endif %}/> Write over original file
+              </label>
+          </div>
+          <div class="p-1">
+              <button type="submit" class="btn btn-primary">Preview or save changes</button>
+          </div>
+      </div>
+    </div>
     <table class="table table-bordered table-hover" style="width: 100%; table-layout: fixed;">
       <thead>
         <tr>
           <th class="number">Line ID</th>
             <th class="number">Bottom max dist</th>
             <th class="number">Top max dist</th>
+            <th class="number">Points</th>
             <th>Image</th>
             <th>Preview</th>
             <th class="number">Preview height</th>
-            <th class="number"><a id="applyToAll" href="#">Apply to all</a></th>
+            <th class="number">Preview points</th>
+            <th><a id="applyToAll" href="#">Apply to all</a></th>
         </tr>
       </thead>
       <tbody>
@@ -52,18 +75,20 @@
             <tr><td class="number">{{row}}</td>
                 <td class="number">{% if vals.under %}{{vals.under.value}}{%endif%}</td>
                 <td class="number">{% if vals.above %}{{vals.above.value}}{%endif%}</td>
+                <td class="number">{{lines[row].boundary|length}}</td>
                 <td><img src="{{orig_images[row]}}" class="img-fluid" alt="There should be an image here" /></td>
                 <td><img src="{{preview[row].img}}" class="img-fluid" alt="There should be an image here" /></td>
                 <td class="number">{{preview[row].height}}</td>
+                <td class="number">{{new_content[row].boundary|length}}</td>
                 <td>
                     {% if vals.under %}
                         <input type="checkbox" name="update_under_{{row}}" id="update_under_{{row}}" value="on" {% if row in margins%}checked{%endif%}> <label for="update_under_{{row}}">Apply to bottom mask</label><br />
-                        Custom bottom margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_under_y%}{{margins[row].margin_under_y}}{%else%}0{%endif%}" id="custom_margin_under_{{row}}" name="custom_margin_under_{{row}}" /><br />
+                        Custom bottom margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_under%}{{margins[row].margin_under}}{%else%}0{%endif%}" id="custom_margin_under_{{row}}" name="custom_margin_under_{{row}}" /><br />
                         {% if vals.min %}<hr />{% endif %}
                     {% endif %}
                     {% if vals.above %}
                         <input type="checkbox" name="update_above_{{row}}" id="update_above_{{row}}" value="on" {% if row in margins%}checked{%endif%}> <label for="update_above_{{row}}">Apply to top mask</label><br />
-                        Custom top margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_above_y%}{{margins[row].margin_above_y}}{%else%}0{%endif%}" id="custom_margin_above_{{row}}" name="custom_margin_above_{{row}}" /><br />
+                        Custom top margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_above%}{{margins[row].margin_above}}{%else%}0{%endif%}" id="custom_margin_above_{{row}}" name="custom_margin_above_{{row}}" /><br />
                     {% endif %}
                 </td>
             </tr>
