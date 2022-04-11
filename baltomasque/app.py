@@ -2,6 +2,7 @@ import os
 import glob
 import logging
 from math import ceil
+from dataclasses import dataclass
 from statistics import median
 from collections import namedtuple
 from typing import List, Optional, Iterable, Any, Dict, Tuple, Union
@@ -63,9 +64,24 @@ def nicename(filename):
     return os.path.basename(filename)
 
 
-BoundaryBaselineY = namedtuple("BoundaryBaselineY", ["max_y", "min_y", "base_y_max", "base_y_min",
-                                                     "dist_min", "dist_max"])
-Score = namedtuple("Score", ["median", "iqr"])
+@dataclass
+class BoundaryBaselineY:
+    # All values are ABSOLUTE values
+    max_y_under: int
+    max_y_above: int
+    base_y_max: int
+    base_y_min: int
+    max_under_distance: int
+    max_above_distance: int
+
+
+@dataclass
+class Score:
+    # All values are ABSOLUTE values
+    median: float
+    prct: float
+
+
 Outlier = namedtuple("Outlier", ["idx", "value", "score"])
 
 
@@ -75,71 +91,72 @@ def get_min_max_y(lines: List[Dict[str, Any]]) -> Iterable[BoundaryBaselineY]:
         dists = []
         baselines = []
         for (x_pol, y_pol) in line["boundary"]:
+            # If dist is negative, that means that the polygon is above the baseline, as Y starts from the top at 0
+            #   If a polygon above the line was at 0 and the baseline at 5, -5 would be the dist
             _, base_y = get_closest_points((x_pol, y_pol), line["advanced_baseline"])
-            dist = abs(base_y - y_pol)
+            dist = y_pol - base_y  # If negative, the line is after the polygon, it's the min idx
             if dist != 0:
                 ys.append(y_pol)
                 dists.append(dist)
                 baselines.append(base_y)
-        max_idx = dists.index(max(dists))
-        min_idx = dists.index(min(dists))
+        under_baseline = dists.index(max(dists))
+        above_baseline = dists.index(min(dists))
         yield BoundaryBaselineY(
-            ys[max_idx],
-            ys[min_idx],
-            baselines[max_idx],
-            baselines[min_idx],
-            dists[max_idx],
-            dists[min_idx]
+            ys[under_baseline],
+            ys[above_baseline],
+            baselines[under_baseline],
+            baselines[above_baseline],
+            dists[under_baseline],
+            abs(dists[above_baseline])  # All should be absolute values
         )
 
 
-def get_diff(bby: Union[Tuple[int, int], BoundaryBaselineY], mode: str = "min_y"):
-    if mode == "min_y":
-        return bby.dist_min
+def get_max_dist(bby: Union[Tuple[int, int], BoundaryBaselineY], mode: str = "under"):
+    if mode == "under":
+        return bby.max_under_distance
     else:
-        return bby.dist_max
+        return bby.max_above_distance
 
 
-def is_outlier(bby: Union[Tuple[int, int], BoundaryBaselineY], score: Score, mode: str = "min_y"):
-    diff_y = get_diff(bby, mode=mode)
-    if diff_y > score.iqr:
-        return diff_y, abs(score.iqr - diff_y)
+def is_outlier(bby: Union[Tuple[int, int], BoundaryBaselineY], score: Score, mode: str = "under"):
+    diff_y = get_max_dist(bby, mode=mode)
+    if diff_y > score.prct:
+        return diff_y, abs(score.prct - diff_y)
     return False
 
 
-def is_up_outlier(p_y: int, b_y: int, score: Score):
-    diff_y = abs(p_y - b_y)
-    if diff_y < score.iqr:
-        return False
-    return True
-
-
-def get_outliers_iqr(lines: List[BoundaryBaselineY], score: Score, attr: str = "min_y") -> Iterable[Outlier]:
+def get_outliers_iqr(lines: List[BoundaryBaselineY], score: Score, attr: str = "under") -> Iterable[Outlier]:
     for line_idx, line in enumerate(lines):
         was_outlier = is_outlier(line, score, mode=attr)
         if was_outlier:
             yield Outlier(line_idx, *was_outlier)
 
 
-def compute_cuttings(boundaries: List[BoundaryBaselineY], qrt_bot: int = 10, qrt_top: int = 10) -> Tuple[Score, Score]:
-    diff_y_max, diff_y_min = list(zip(
+def compute_cuttings(
+        boundaries: List[BoundaryBaselineY],
+        prct_under: int = 10,
+        prct_above: int = 10) -> Tuple[Score, Score]:
+    """ This function computes the percentile and median
+    """
+    above_distances, under_distances = list(zip(
         *[
-            (bby.dist_max, bby.dist_min)
+            (bby.max_above_distance, bby.max_under_distance)
             for bby in boundaries
         ]
     ))
-    min_score = Score(
-        median(diff_y_min),
-        scipy.stats.scoreatpercentile(diff_y_min, 100-qrt_top)#+median(diff_y_min)
+    under_score = Score(
+        median(under_distances),
+        scipy.stats.scoreatpercentile(under_distances, 100 - prct_under)
     )
-    max_score = Score(
-        median(diff_y_max),
-        scipy.stats.scoreatpercentile(diff_y_max, 100-qrt_bot)#+median(diff_y_max)
+    above_score = Score(
+        median(above_distances),
+        scipy.stats.scoreatpercentile(above_distances, 100 - prct_above)
     )
-    return max_score, min_score
+    return above_score, under_score
 
 
 def img_to_base64(img: Tuple[Image.Image, Any]) -> bytes:
+    """ Transform an Image to a base64 string """
     img, line = img
     buffered = BytesIO()
     img.save(buffered, format="JPEG")
@@ -150,39 +167,45 @@ def img_to_base64(img: Tuple[Image.Image, Any]) -> bytes:
 def redraw_polygon(
         x_y: Iterable[Tuple[int, int]],
         baseline: numpy.typing.ArrayLike,
-        min_y: Optional[Score] = None,
-        max_y: Optional[Score] = None,
-        margin_min_y: int = 0,
-        margin_max_y: int = 0
+        max_under: Optional[Score] = None,
+        max_above: Optional[Score] = None,
+        margin_under: int = 0,
+        margin_above: int = 0
 ):
+    """ Redraw a polygon by removing outliers and replacing them with margin+median"""
     for (x, y) in x_y:
         _, baseline_y = get_closest_points((x, y), baseline)
-        if max_y and y > baseline_y and is_up_outlier(y, baseline_y, max_y):
-            yield x, ceil(baseline_y + max_y.median) + (margin_max_y or 0)
-        elif min_y and y < baseline_y and is_up_outlier(y, baseline_y, min_y):
-            yield x, ceil(baseline_y - min_y.median) - (margin_min_y or 0)
+        # If Y is greater than baseline, then it's part of the bottom of the mask
+        if max_under and y > baseline_y and abs(y - baseline_y) > max_under.prct:
+            # Because it's under, max_under is added to the baseline
+            yield x, ceil(baseline_y + max_under.median) + (margin_under or 0)
+        # If Y is smaller than baseline, then it's part of the top of the mask
+        elif max_above and y < baseline_y and abs(y - baseline_y) > max_above.prct:
+            # Because it's under, max_under is substracted to the baseline
+            yield x, ceil(baseline_y - max_above.median) - (margin_above or 0)
         else:
             yield x, y
 
 
-def apply_iqr(
+def apply_prct(
     outliers: Dict[int, Dict[str, Optional[Outlier]]],
     kept_lines: List[Dict[str, Any]],
-    min_iqr: Score,
-    max_iqr: Score,
+    under_score: Score,
+    above_score: Score,
     margins: Optional[Dict[int, Dict[str, int]]] = None
 ) -> List[Dict[str, Any]]:
+    """ Apply the percentile max distance """
     new_lines = []
     margins = margins or {}
     for line in kept_lines:
         baseline = line["advanced_baseline"]
         details = outliers[line["idx"]]
-        if details["max"] and details["min"]:
-            scores = dict(min_y=min_iqr, max_y=max_iqr)
-        elif details["max"]:
-            scores = dict(max_y=max_iqr)
+        if details["above"] and details["under"]:
+            scores = dict(max_under=under_score, max_above=above_score)
+        elif details["above"]:
+            scores = dict(max_above=above_score)
         else:
-            scores = dict(min_y=min_iqr)
+            scores = dict(max_under=under_score)
         if line["idx"] in margins:
             scores.update(margins[line["idx"]])
         new_lines.append({
@@ -194,16 +217,18 @@ def apply_iqr(
 
 
 def get_closest_points(current_point: Tuple[int, int], baseline: np.typing.ArrayLike) -> Tuple[int, int]:
+    """ Get the closest point to CURRENT_POINT in the redrawn baseline"""
     distances = np.linalg.norm(baseline - np.array(current_point), axis=1)
     min_index = np.argmin(distances)
     return tuple(baseline[min_index])
 
 
-def get_all_points(baseline: List[Tuple[int, int]]) -> np.typing.ArrayLike:
+def get_all_points(baseline: List[Tuple[int, int]], number_of_points: int = 50) -> np.typing.ArrayLike:
+    """ Get all points for a given baseline"""
     # https://gis.stackexchange.com/questions/263859/fast-way-to-get-all-points-as-integer-of-a-linestring-in-shapely
     ls = LineString(baseline)
     xy = []
-    for f in range(0, int(ceil(ls.length)) + 1, ceil(ls.length/50)):
+    for f in range(0, int(ceil(ls.length)) + 1, ceil(ls.length/number_of_points)):
         p = ls.interpolate(f).coords[0]
         pr = tuple(map(round, p))
         if pr not in xy:
@@ -212,13 +237,57 @@ def get_all_points(baseline: List[Tuple[int, int]]) -> np.typing.ArrayLike:
 
 
 def add_advanced_baseline(line: Dict[str, Any]) -> Dict[str, Any]:
+    """ Redraw a baseline by adding points """
     line["advanced_baseline"] = get_all_points(line["baseline"])
     return line
 
 
-@app.route('/image/<path:path>')
-def get_image(path):
-    return send_file("/"+path if path.startswith("home") else path)
+def get_medians(boundaries: Iterable[BoundaryBaselineY]) -> Tuple[float, float]:
+    """ Get medians of distances for under and above baseline distances
+    """
+    dists_under, dists_above = list(zip(
+        *[
+            (bby.max_under_distance, bby.max_above_distance)
+            for bby in boundaries
+        ]
+    ))
+    return abs(median(dists_under)), abs(median(dists_above))
+
+
+def apply_min_max(
+        lines: List[Dict[str, Any]],
+        under_baseline_max: int,
+        above_baseline_max: int) -> Iterable[Dict[str, Any]]:
+    """ Apply to a maximum height or a maximum depth to each line
+    """
+    for line in lines:
+        new_boundaries = []
+        for (x_pol, y_pol) in line["boundary"]:
+            _, base_y = get_closest_points((x_pol, y_pol), line["advanced_baseline"])
+            # If dist is negative, that means that the polygone is above the baseline, as Y starts from the top at 0
+            #   If a polygon above the line was at 0 and the baseline at 5, -5 would be the dist
+            dist = y_pol - base_y
+            if dist < 0:
+                # As such, we want the maximum value of Y(Polygon) vs Y(Baseline)+Margin,
+                #  because if the maximum distance between baseline and top max was 3,
+                #  we would want Y(Baseline) - Y(Max-Above-Baseline) = 2 as the top polygon Y
+                new_boundaries.append((x_pol, max(0, y_pol, base_y-above_baseline_max)))
+            else:
+                # On the contrary, we want the minimum value of Y(Polygon) vs Y(Baseline)+Margin,
+                #  because if the maximum distance between Y(Baseline) and Y(BottomOfPolygon) was 3,
+                #  but Dist(Y(Polygon), Y(Baseline) was 5 where Y(Baseline) = 10
+                #  we would want Y(Baseline) + Y(Max-under-Baseline) = 3 as the bottom polygon Y
+                new_boundaries.append((x_pol, min(y_pol, base_y+under_baseline_max)))
+
+        yield {**line, "boundary": new_boundaries}
+
+
+@app.route('/image')
+def get_image():
+    path = request.args.get("path", None)
+    if not path:
+        return None
+    return send_file(path)
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -231,12 +300,55 @@ def index():
     return render_template("index.html", details=details, pages=xmls)
 
 
-@app.route("/approach/stats", methods=["GET", "POST"])
-def page_iqr():
+@app.route("/approach/margins", methods=["GET", "POST"])
+def page_margins():
     xmls = get_xml()
     page = request.args.get("page", xmls[0])
-    qrt_bot = request.args.get("qrt_bot", 20, type=int)
-    qrt_top = request.args.get("qrt_top", 10, type=int)
+    content = parse_xml(page)
+    lines = content["lines"]
+    lines = [add_advanced_baseline(line) for line in lines]
+    lines = [{"idx": idx, **line} for idx, line in enumerate(lines)]
+
+    under_median, above_median = get_medians(get_min_max_y(lines))
+    max_under = ceil(request.args.get("max_under", under_median, type=int)) or under_median
+    max_above = ceil(request.args.get("max_above", above_median, type=int)) or above_median
+
+    image = Image.open(content["image"])
+    orig_images = {
+        poly[1]["idx"]: img_to_base64(poly)
+        for poly in extract_polygons(image, {"lines": lines, "type": "baselines"})
+    }
+
+    new_lines = list(apply_min_max(
+        lines,
+        under_baseline_max=max_under,
+        above_baseline_max=max_above
+    ))
+    preview = {
+        poly[1]["idx"]: img_to_base64(poly)
+        for poly in extract_polygons(image, {"lines": new_lines, "type": "baselines"})
+    }
+
+    return render_template(
+        "baseline_mode.html",
+        content={l["idx"]: l for l in lines},
+        orig_images=orig_images,
+        medians={"above": above_median, "under": under_median},
+        form={"max_under": request.args.get("max_above", ""), "max_above": request.args.get("max_above", "")},
+        pages=xmls,
+        preview=preview,
+        current_page=page
+    )
+
+
+@app.route("/approach/stats", methods=["GET", "POST"])
+def page_prct():
+    xmls = get_xml()
+    page = request.args.get("page", xmls[0])
+
+    under_prct = request.args.get("under_prct", 5, type=int)
+    above_prct = request.args.get("above_prct", 10, type=int)
+
     # ToDo: Allow for linetype ignoring
     ignore_zone = request.args.get("ignore_zone", "", type=str)
     content = parse_xml(page)
@@ -244,18 +356,18 @@ def page_iqr():
     lines = [add_advanced_baseline(line) for line in lines]
 
     masks_extremes = list(get_min_max_y(lines))
-    max_cuttings, min_cuttings = compute_cuttings(masks_extremes, qrt_bot=qrt_bot, qrt_top=qrt_top)
-    max_outliers = list(get_outliers_iqr(masks_extremes, max_cuttings, "max_y"))
-    min_outliers = list(get_outliers_iqr(masks_extremes, min_cuttings, "min_y"))
+    above_score, under_score = compute_cuttings(masks_extremes, prct_under=under_prct, prct_above=above_prct)
+    above_outliers = list(get_outliers_iqr(masks_extremes, above_score, "above"))
+    under_outliers = list(get_outliers_iqr(masks_extremes, under_score, "under"))
 
     outliers: Dict[int, Dict[str, Optional[Outlier]]] = {
-        line.idx: {"max": line, "min": None}
-        for line in max_outliers
+        line.idx: {"above": line, "under": None}
+        for line in above_outliers
     }
-    for line in min_outliers:
+    for line in under_outliers:
         if line.idx not in outliers:
-            outliers[line.idx] = {"max": None, "min": None}
-        outliers[line.idx]["min"] = line
+            outliers[line.idx] = {"above": None, "under": None}
+        outliers[line.idx]["under"] = line
 
     image = Image.open(content["image"])
 
@@ -274,19 +386,25 @@ def page_iqr():
     margins = {}
     if request.method == "POST":
         margins = {
-            int(field_name.split("_")[-1]): {"margin_max_y": None, "margin_min_y": None}
+            int(field_name.split("_")[-1]): {"margin_above": None, "margin_under": None}
             for field_name in request.form
             if field_name.startswith("update_") and request.form[field_name] == "on"
         }
         for field_name in request.form:
             if request.form[field_name] != "0" and field_name.startswith("custom_margin"):
                 idx = int(field_name.split("_")[-1])
-                if "max" in field_name and request.form.get(f"update_max_{idx}", "off") == "on":
-                    margins[idx]["margin_max_y"] = int(request.form[field_name])
-                if "min" in field_name and request.form.get(f"update_min_{idx}", "off") == "on":
-                    margins[idx]["margin_min_y"] = int(request.form[field_name])
+                if "margin_above" in field_name and request.form.get(f"update_above_{idx}", "off") == "on":
+                    margins[idx]["margin_above"] = int(request.form[field_name])
+                if "margin_under" in field_name and request.form.get(f"update_under_{idx}", "off") == "on":
+                    margins[idx]["margin_under"] = int(request.form[field_name])
 
-    changes = apply_iqr(outliers, kept_lines, min_iqr=min_cuttings, max_iqr=max_cuttings, margins=margins)
+    changes = apply_prct(
+        outliers,
+        kept_lines,
+        under_score=under_score,
+        above_score=above_score,
+        margins=margins
+    )
     preview = {
         poly[1]["idx"]: {"img": img_to_base64(poly), "height": poly[0].height}
         for poly in extract_polygons(image, {"lines": changes, "type": "baselines"})
@@ -315,11 +433,11 @@ def page_iqr():
         doc=doc,
         content=outliers,
         orig_images=orig_images,
-        medians={"top": max_cuttings, "bot": min_cuttings},
+        scores={"above": above_score, "under": under_score},
         lines=lines,
         pages=xmls,
         current_page=page,
-        qrt_bot=qrt_bot,
-        qrt_top=qrt_top,
+        above_prct=above_prct,
+        under_prct=under_prct,
         preview=preview, margins=margins
     )

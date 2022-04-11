@@ -4,10 +4,10 @@
     <div class="col-md-6">
       <h2>Scores</h2>
       <dl class="row">
-          <dt class="col-sm-6">Median maximum difference between baseline and <u>top</u> of the mask</dt>
-          <dd class="col-sm-6">{{medians.top.median}} (Percentile: {{medians.top.iqr}})</dd>
-          <dt class="col-sm-6">Median maximum difference between baseline and <u>bottom</u> of the mask</dt>
-          <dd class="col-sm-6">{{medians.bot.median}} (Percentile: {{medians.bot.iqr}})</dd>
+          <dt class="col-sm-6">Median distance between baseline and <u>top</u> of the mask</dt>
+          <dd class="col-sm-6">{{scores.above.median}} (Percentile: {{scores.above.prct}})</dd>
+          <dt class="col-sm-6">Median distance between baseline and <u>bottom</u> of the mask</dt>
+          <dd class="col-sm-6">{{scores.under.median}} (Percentile: {{scores.under.prct}})</dd>
           <dt class="col-sm-6">Number of lines found</dt>
           <dd class="col-sm-6">{{lines|length}}</dd>
           <dt class="col-sm-6">Number of outliers found</dt>
@@ -15,22 +15,22 @@
       </dl>
     </div>
     <div class="col-md-6">
-        <form class="form border rounded p-2" action="{{url_for("page_iqr")}}" method="get">
+        <form class="form border rounded p-2" action="{{url_for("page_prct")}}" method="get">
             <h2>Parameters</h2>
             <input type="hidden" name="page" value="{{current_page}}">
             <div class="row">
-                <label class="col-md-6  col-form-label" for="qrt_top">Percentile des masques les plus hauts</label>
-                <div class="col-md-6"><input name="qrt_top" id="qrt_top" class="form-control" type="number" min="1" max="49" value="{{qrt_top}}" /></div>
+                <label class="col-md-6  col-form-label" for="above_prct">Percentile for the top of the mask</label>
+                <div class="col-md-6"><input name="above_prct" id="above_prct" class="form-control" type="number" min="1" max="49" value="{{above_prct}}" /></div>
             </div>
             <div class="row">
-                <label class="col-md-6  col-form-label" for="qrt_bot">Percentile des masques les plus bas</label>
-                <div class="col-md-6"><input name="qrt_bot" id="qrt_bot" class="form-control" type="number" min="1" max="49" value="{{qrt_bot}}" /></div>
+                <label class="col-md-6  col-form-label" for="under_prct">Percentile for the bottom of the mask</label>
+                <div class="col-md-6"><input name="under_prct" id="under_prct" class="form-control" type="number" min="1" max="49" value="{{under_prct}}" /></div>
             </div>
             <button class="btn btn-primary" type="submit">Change parameters</button>
         </form>
     </div>
 </div>
-<form class="form border rounded p-2" action="{{url_for("page_iqr", page=current_page, qrt=qrt)}}" method="POST">
+<form class="form border rounded p-2" id="main-form" action="{{url_for("page_prct", page=current_page, under_prct=under_prct, above_prct=above_prct)}}" method="POST">
     <input type="submit" class="btn btn-primary" value="Preview changes" />
       <label for="serialize">
         <input type="checkbox" name="serialize"  id="serialize" value="on" /> Serialize
@@ -44,25 +44,26 @@
             <th>Image</th>
             <th>Preview</th>
             <th class="number">Preview height</th>
+            <th class="number"><a id="applyToAll" href="#">Apply to all</a></th>
         </tr>
       </thead>
       <tbody>
         {% for row, vals in content.items() %}
             <tr><td class="number">{{row}}</td>
-                <td class="number">{% if vals.max %}{{vals.max.value}}{%endif%}</td>
-                <td class="number">{% if vals.min %}{{vals.min.value}}{%endif%}</td>
+                <td class="number">{% if vals.under %}{{vals.under.value}}{%endif%}</td>
+                <td class="number">{% if vals.above %}{{vals.above.value}}{%endif%}</td>
                 <td><img src="{{orig_images[row]}}" class="img-fluid" alt="There should be an image here" /></td>
                 <td><img src="{{preview[row].img}}" class="img-fluid" alt="There should be an image here" /></td>
                 <td class="number">{{preview[row].height}}</td>
                 <td>
-                    {% if vals.max %}
-                        <input type="checkbox" name="update_max_{{row}}" id="update_max_{{row}}" value="on" {% if row in margins%}checked{%endif%}> <label for="update_max_{{row}}">Apply to bottom mask</label><br />
-                        Custom bottom margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_max_y%}{{margins[row].margin_max_y}}{%else%}0{%endif%}" id="custom_margin_max_{{row}}" name="custom_margin_max_{{row}}" /><br />
+                    {% if vals.under %}
+                        <input type="checkbox" name="update_under_{{row}}" id="update_under_{{row}}" value="on" {% if row in margins%}checked{%endif%}> <label for="update_under_{{row}}">Apply to bottom mask</label><br />
+                        Custom bottom margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_under_y%}{{margins[row].margin_under_y}}{%else%}0{%endif%}" id="custom_margin_under_{{row}}" name="custom_margin_under_{{row}}" /><br />
                         {% if vals.min %}<hr />{% endif %}
                     {% endif %}
-                    {% if vals.min %}
-                        <input type="checkbox" name="update_min_{{row}}" id="update_min_{{row}}" value="on" {% if row in margins%}checked{%endif%}> <label for="update_min_{{row}}">Apply to top mask</label><br />
-                        Custom top margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_min_y%}{{margins[row].margin_min_y}}{%else%}0{%endif%}" id="custom_margin_min_{{row}}" name="custom_margin_min_{{row}}" /><br />
+                    {% if vals.above %}
+                        <input type="checkbox" name="update_above_{{row}}" id="update_above_{{row}}" value="on" {% if row in margins%}checked{%endif%}> <label for="update_above_{{row}}">Apply to top mask</label><br />
+                        Custom top margin: <input size="5" type="number" value="{% if row in margins and margins[row].margin_above_y%}{{margins[row].margin_above_y}}{%else%}0{%endif%}" id="custom_margin_above_{{row}}" name="custom_margin_above_{{row}}" /><br />
                     {% endif %}
                 </td>
             </tr>
@@ -70,4 +71,12 @@
       </tbody>
     </table>
 </form>
+<script type="text/javascript">
+    (function (){
+        document.querySelector("#applyToAll").addEventListener("click", function(event) {
+            event.preventDefault();
+            document.querySelectorAll("input[name^='update_']").forEach(el => { el.checked = true; });
+        });
+    })()
+</script>
 {% endblock %}

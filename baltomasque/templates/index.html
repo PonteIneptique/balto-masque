@@ -8,7 +8,8 @@
             <div class="card-body">
             <h5 class="card-title">{{parsed.basename}}</h5>
             <p class="card-text">
-                <a class="btn btn-primary" href="{{url_for("page_iqr", page=page)}}">Check outliers</a>
+                <a class="btn btn-primary" href="{{url_for("page_prct", page=page)}}">Check outliers</a>
+                <a class="btn btn-secondary" href="{{url_for("page_margins", page=page)}}">Normalize</a>
             </p>
           </div>
         </div>

@@ -1,4 +1,56 @@
 {% extends "container.html" %}
 {% block body %}
-    {{url_for("get_page")}}
+<div class="row">
+    <div class="col-md-6">
+      <h2>Scores</h2>
+      <dl class="row">
+          <dt class="col-sm-6">Median distance between baseline and <u>bottom</u> of the mask (<u>Depth</u>)</dt>
+          <dd class="col-sm-6">{{medians.under}}</dd>
+          <dt class="col-sm-6">Median distance between baseline and <u>top</u> of the mask (<u>Height</u>)</dt>
+          <dd class="col-sm-6">{{medians.above}}</dd>
+          <dt class="col-sm-6">Number of lines found</dt>
+          <dd class="col-sm-6">{{lines|length}}</dd>
+      </dl>
+    </div>
+    <div class="col-md-6">
+        <form class="form border rounded p-2" action="{{url_for("page_margins")}}" method="get">
+            <h2>Parameters</h2>
+            <input type="hidden" name="page" value="{{current_page}}">
+            <div class="row">
+                <label class="col-md-6  col-form-label" for="max_below">Maximum depth reached by mask</label>
+                <div class="col-md-6"><input name="max_below" id="max_below" class="form-control" type="number" min="0" value="{{max_below}}" /></div>
+            </div>
+            <div class="row">
+                <label class="col-md-6  col-form-label" for="max_above">Maximum height reached by mask</label>
+                <div class="col-md-6"><input name="max_above" id="max_above" class="form-control" type="number" min="0" value="{{max_above}}" /></div>
+            </div>
+            <button class="btn btn-primary" type="submit">Change parameters</button>
+        </form>
+    </div>
+</div>
+<form class="form border rounded p-2" action="{{url_for("page_margins", page=current_page, qrt=qrt)}}" method="POST">
+    <input type="submit" class="btn btn-primary" value="Preview changes" />
+      <label for="serialize">
+        <input type="checkbox" name="serialize"  id="serialize" value="on" /> Serialize
+      </label>
+    <table class="table table-bordered table-hover" style="width: 100%; table-layout: fixed;">
+      <thead>
+        <tr>
+          <th class="number">Line ID</th>
+          <th class="number">Number of points</th>
+          <th>Image</th>
+          <th>Preview</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row, vals in content.items() %}
+            <tr><td class="number">{{row}}</td>
+                <td class="number">{{content[row].boundary|length}}</td>
+                <td><img src="{{orig_images[row]}}" class="img-fluid" alt="There should be an image here" /></td>
+                <td><img src="{{preview[row]}}" class="img-fluid" alt="Preview" /></td>
+            </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+</form>
 {% endblock %}
